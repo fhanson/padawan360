@@ -16,6 +16,10 @@ support for PS3 and Xbox 360 controllers. Bluetooth dongles were inconsistent as
 so I wanted to be able to have something with parts that other builder's could easily track
 down and buy parts even at your local big box store.
 
+V3.0 Add PWM Foot drive for use with Q85 style hub drives with individual speed controllers
+- Based on KnightShade's SHADOW code with contributions for PWM Motor Controllers by JoyMonkey/Paul Murphy
+- With credit to Brad/BHD
+
 v2.0 Changes:
 - Makes left analog stick default drive control stick. Configurable between left or right stick via isLeftStickDrive 
 
@@ -39,13 +43,25 @@ Placed a 10K ohm resistor between S1 & GND on the SyRen 10 itself
 
 */
 
+// PWM Hub Motor Mode settings...
+#define FOOT_CONTROLLER 1  //0 for Sabertooth Serial or 1 for individual R/C output (for Q85/NEO motors with 1 controller for each foot, or Sabertooth Mode 2 Independant Mixing)
+int footDriveSpeed = 0;    //This was moved to be global to support better ramping of NPC Motors
+int SteeringFactor = 100;  //The larger SteeringFactor is the less senstitive steering is...//Smaller values give more accuracy in making fine steering corrections
+                           //XDist*sqrt(XDist+SteeringFactor)
+#define leftFootPin 44     //connect this pin to motor controller for left foot (R/C mode)
+#define rightFootPin 45    //connect this pin to motor controller for right foot (R/C mode)
+#define leftDirection 1    //change this if your motor is spinning the wrong way
+#define rightDirection 0   //change this if your motor is spinning the wrong way
+int leftFoot = 90;
+int rightFoot = 90;
+
 // ************************** Options, Configurations, and Settings ***********************************
 
 
 // SPEED AND TURN SPEEDS
 //set these 3 to whatever speeds work for you. 0-stop, 127-full speed.
 const byte DRIVESPEED1 = 50;
-// Recommend beginner: 50 to 75, experienced: 100 to 127, I like 100. 
+// Recommend beginner: 50 to 75, experienced: 100 to 127, I like 100.
 // These may vary based on your drive system and power system
 const byte DRIVESPEED2 = 100;
 //Set to 0 if you only want 2 speeds.
@@ -61,7 +77,7 @@ const byte TURNSPEED = 70;
 
 // Set isLeftStickDrive to true for driving  with the left stick
 // Set isLeftStickDrive to false for driving with the right stick (legacy and original configuration)
-boolean isLeftStickDrive = true; 
+boolean isLeftStickDrive = true;
 
 // If using a speed controller for the dome, sets the top speed. You'll want to vary it potenitally
 // depending on your motor. My Pittman is really fast so I dial this down a ways from top speed.
@@ -101,7 +117,7 @@ byte vol = 20;
 
 // Automation Delays
 // set automateDelay to min and max seconds between sounds
-byte automateDelay = random(5, 20); 
+byte automateDelay = random(5, 20);
 //How much the dome may turn during automation.
 int turnDirection = 20;
 
@@ -113,9 +129,13 @@ int turnDirection = 20;
 #include <Wire.h>
 #include <XBOXRECV.h>
 
+#include <Servo.h>
+
 
 /////////////////////////////////////////////////////////////////
+#if FOOT_CONTROLLER == 0
 Sabertooth Sabertooth2x(128, Serial1);
+#endif
 Sabertooth Syren10(128, Serial2);
 
 // Satisfy IDE, which only needs to see the include statment in the ino.
@@ -137,8 +157,10 @@ byte automateAction = 0;
 
 int driveThrottle = 0;
 int throttleStickValue = 0;
+int throttleStickValueraw = 0;
 int domeThrottle = 0;
 int turnThrottle = 0;
+int turnThrottleraw = 0;
 
 boolean firstLoadOnConnect = false;
 
@@ -169,6 +191,12 @@ MP3Trigger mp3Trigger;
 USB Usb;
 XBOXRECV Xbox(&Usb);
 
+// PWM Hub Motor Mode settings...
+#if FOOT_CONTROLLER == 1
+Servo leftFootSignal;
+Servo rightFootSignal;
+#endif
+
 void setup() {
   Serial1.begin(SABERTOOTHBAUDRATE);
   Serial2.begin(DOMEBAUDRATE);
@@ -179,6 +207,7 @@ void setup() {
   Syren10.autobaud();
 #endif
 
+#if FOOT_CONTROLLER == 0
   // Send the autobaud command to the Sabertooth controller(s).
   /* NOTE: *Not all* Sabertooth controllers need this command.
   It doesn't hurt anything, but V2 controllers use an
@@ -196,6 +225,12 @@ void setup() {
 
 
   Sabertooth2x.setTimeout(950);
+#elif FOOT_CONTROLLER == 1
+  leftFootSignal.attach(leftFootPin);
+  rightFootSignal.attach(rightFootPin);
+  stopFeet();
+#endif
+
   Syren10.setTimeout(950);
 
   pinMode(EXTINGUISHERPIN, OUTPUT);
@@ -204,7 +239,7 @@ void setup() {
   mp3Trigger.setup();
   mp3Trigger.setVolume(vol);
 
-  if(isLeftStickDrive) {
+  if (isLeftStickDrive) {
     throttleAxis = LeftHatY;
     turnAxis = LeftHatX;
     domeAxis = RightHatX;
@@ -220,15 +255,17 @@ void setup() {
   }
 
 
- // Start I2C Bus. The body is the master.
+  // Start I2C Bus. The body is the master.
   Wire.begin();
 
   //Serial.begin(115200);
   // Wait for serial port to connect - used on Leonardo, Teensy and other boards with built-in USB CDC serial connection
-  while (!Serial);
+  while (!Serial)
+    ;
   if (Usb.Init() == -1) {
     //Serial.print(F("\r\nOSC did not start"));
-    while (1); //halt
+    while (1)
+      ;  //halt
   }
   //Serial.print(F("\r\nXbox Wireless Receiver Library Started"));
 }
@@ -240,8 +277,13 @@ void loop() {
   // set all movement to 0 so if we lose connection we don't have a runaway droid!
   // a restraining bolt and jawa droid caller won't save us here!
   if (!Xbox.XboxReceiverConnected || !Xbox.Xbox360Connected[0]) {
+#if FOOT_CONTROLLER == 0
     Sabertooth2x.drive(0);
     Sabertooth2x.turn(0);
+#elif FOOT_CONTROLLER == 1
+    stopFeet();
+#endif
+
     Syren10.motor(1, 0);
     firstLoadOnConnect = false;
     return;
@@ -253,9 +295,9 @@ void loop() {
     mp3Trigger.play(21);
     Xbox.setLedMode(ROTATING, 0);
   }
-  
+
   if (Xbox.getButtonClick(XBOX, 0)) {
-    if(Xbox.getButtonPress(L1, 0) && Xbox.getButtonPress(R1, 0)){ 
+    if (Xbox.getButtonPress(L1, 0) && Xbox.getButtonPress(R1, 0)) {
       Xbox.disconnect(0);
     }
   }
@@ -326,7 +368,7 @@ void loop() {
       }
 
       // sets the mix, max seconds between automation actions - sounds and dome movement
-      automateDelay = random(3,10);
+      automateDelay = random(3, 10);
     }
   }
 
@@ -482,7 +524,7 @@ void loop() {
 
   // turn hp light on & off with Right Analog Stick Press (R3) for left stick drive mode
   // turn hp light on & off with Left Analog Stick Press (L3) for right stick drive mode
-  if (Xbox.getButtonClick(hpLightToggleButton, 0))  {
+  if (Xbox.getButtonClick(hpLightToggleButton, 0)) {
     // if hp light is on, turn it off
     if (isHPOn) {
       isHPOn = false;
@@ -527,24 +569,31 @@ void loop() {
   }
 
 
- 
+
   // FOOT DRIVES
   // Xbox 360 analog stick values are signed 16 bit integer value
+// PWM Hub Motor Mode settings...
+#if FOOT_CONTROLLER == 0
   // Sabertooth runs at 8 bit signed. -127 to 127 for speed (full speed reverse and  full speed forward)
   // Map the 360 stick values to our min/max current drive speed
   throttleStickValue = (map(Xbox.getAnalogHat(throttleAxis, 0), -32768, 32767, -drivespeed, drivespeed));
   if (throttleStickValue > -DRIVEDEADZONERANGE && throttleStickValue < DRIVEDEADZONERANGE) {
     // stick is in dead zone - don't drive
     driveThrottle = 0;
+    stopFeet();
   } else {
+    if (isInAutomationMode) {  // Turn of automation if using the drive motors
+      isInAutomationMode = false;
+      automateAction = 0;
+    }
     if (driveThrottle < throttleStickValue) {
-      if (throttleStickValue - driveThrottle < (RAMPING + 1) ) {
+      if (throttleStickValue - driveThrottle < (RAMPING + 1)) {
         driveThrottle += RAMPING;
       } else {
         driveThrottle = throttleStickValue;
       }
     } else if (driveThrottle > throttleStickValue) {
-      if (driveThrottle - throttleStickValue < (RAMPING + 1) ) {
+      if (driveThrottle - throttleStickValue < (RAMPING + 1)) {
         driveThrottle -= RAMPING;
       } else {
         driveThrottle = throttleStickValue;
@@ -562,10 +611,38 @@ void loop() {
     if (turnThrottle > -DRIVEDEADZONERANGE && turnThrottle < DRIVEDEADZONERANGE) {
       // stick is in dead zone - don't turn
       turnThrottle = 0;
+      stopFeet();
     }
     Sabertooth2x.turn(-turnThrottle);
     Sabertooth2x.drive(driveThrottle);
   }
+
+#elif FOOT_CONTROLLER == 1
+  //Experimental Q85. Untested Madness!!! Use at your own risk and expect your droid to run away in flames.
+  //use BigHappyDude's mixing algorythm to get values for each foot...
+  throttleStickValueraw = Xbox.getAnalogHat(throttleAxis, 0);
+  turnThrottleraw = Xbox.getAnalogHat(turnAxis, 0);
+
+  if (isDriveEnabled) {
+    if (throttleStickValueraw > (-DRIVEDEADZONERANGE * 258) && throttleStickValueraw < (DRIVEDEADZONERANGE * 258)) {
+      // stick is in dead zone - don't drive
+      stopFeet();
+    } else {
+      if (isInAutomationMode) {  // Turn of automation if using the drive motors
+        isInAutomationMode = false;
+        automateAction = 0;
+      }
+
+      mixBHD(throttleStickValueraw, turnThrottleraw, drivespeed);  // Call function to gett values for leftFoot and rightFoot
+
+      leftFootSignal.write(leftFoot);
+      rightFootSignal.write(rightFoot);
+    }
+  } else {
+    stopFeet();
+  }
+
+#endif
 
   // DOME DRIVE!
   domeThrottle = (map(Xbox.getAnalogHat(domeAxis, 0), -32768, 32767, DOMESPEED, -DOMESPEED));
@@ -575,10 +652,185 @@ void loop() {
   }
 
   Syren10.motor(1, domeThrottle);
-} // END loop()
+}  // END loop()
 
 void triggerI2C(byte deviceID, byte eventID) {
   Wire.beginTransmission(deviceID);
   Wire.write(eventID);
   Wire.endTransmission();
+}
+
+void triggerAutomation() {
+  // Plays random sounds or dome movements for automations when in automation mode
+  unsigned long currentMillis = millis();
+
+  if (currentMillis - automateMillis > (automateDelay * 1000)) {
+    automateMillis = millis();
+    automateAction = random(1, 5);
+
+    if (automateAction > 1) {
+      mp3Trigger.play(random(32, 52));
+    }
+    if (automateAction < 4) {
+
+      //************* Move the dome for 750 msecs  **************
+
+#if defined(SYRENSIMPLE)
+      Syren10.motor(turnDirection);
+#else
+      Syren10.motor(1, turnDirection);
+#endif
+
+      delay(750);
+
+//************* Stop the dome motor **************
+#if defined(SYRENSIMPLE)
+      Syren10.motor(0);
+#else
+      Syren10.motor(1, 0);
+#endif
+
+      //************* Change direction for next time **************
+      if (turnDirection > 0) {
+        turnDirection = -45;
+      } else {
+        turnDirection = 45;
+      }
+    }
+
+    // sets the mix, max seconds between automation actions - sounds and dome movement
+    automateDelay = random(5, 15);
+  }
+}
+
+// =======================================================================================
+// //////////////////////////Mixing Function for R/C Mode////////////////////////////////
+// =======================================================================================
+// Based on KnightShade's SHADOW code with contributions for PWM Motor Controllers by JoyMonkey/Paul Murphy
+// With credit to Brad/BHD
+#if FOOT_CONTROLLER == 1
+void mixBHD(int stickX, int stickY, byte maxDriveSpeed) {
+  // This is BigHappyDude's mixing function, for differential (tank) style drive using two motor controllers.
+  // Takes a joysticks X and Y values, mixes using the diamind mix, and output a value 0-180 for left and right motors.
+  // 180,180 = both feet full speed forward.
+  // 000,000 = both feet full speed reverse.
+  // 180,000 = left foot full forward, right foot full reverse (spin droid clockwise)
+  // 000,180 = left foot full reverse, right foot full forward (spin droid counter-clockwise)
+  // 090,090 = no movement
+  // for simplicity, we think of this diamond matrix as a range from -100 to +100 , then map the final values to servo range (0-180) at the end
+  //  Ramping and Speed mode applied on the droid.
+
+  if (stickX < (-DRIVEDEADZONERANGE * 258) || stickX > (DRIVEDEADZONERANGE * 258)) {
+    //  if movement outside deadzone
+    //  Map to easy grid -100 to 100 in both axis, including deadzones.
+    int YDist = 0;  // set to 0 as a default value if no if used.
+    int XDist = 0;
+
+    YDist = (map(stickY, -32768, 32767, -100, 100));
+    XDist = (map(stickX, -32768, 32767, -100, 100));
+
+    /* Debugging by KnightShade 
+      //Driving is TOO sensitive.   Need to dial down the turning to a different scale factor.
+      This code will map the linear values to a flatter value range.
+
+      //The larger SteeringFactor is the less senstitive steering is...  
+      //Smaller values give more accuracy in making fine steering corrections
+        XDist*sqrt(XDist+SteeringFactor)
+      */
+    //Convert from Linear to a scaled/exponential Steering system
+    //int SteeringFactor = 100;  //TODO - move a constant at top of script
+    int TempScaledXDist = (int)(abs(XDist) * sqrt(abs(XDist) + SteeringFactor));
+    int MaxScale = (100 * sqrt(100 + SteeringFactor));
+    XDist = (map(stickX, 0, MaxScale, 1, 100));  //  Map the left direction stick value to Turn speed
+
+    if (stickX <= (-DRIVEDEADZONERANGE * 258)) {                 //if not in deadzone
+      XDist = -1 * (map(TempScaledXDist, 0, MaxScale, 1, 100));  //  Map the left direction stick value to Turn speed
+    } else if (stickX >= (DRIVEDEADZONERANGE * 258)) {
+      XDist = (map(TempScaledXDist, 0, MaxScale, 1, 100));  //  Map the right direction stick value to Turn speed
+    }
+    //END Convert from Linear to a scaled/exponential Steering system
+
+    //  Constrain to Diamond values.  using 2 line equations and find the intersect, boiled down to the minimum
+    //  This was the inspiration; https://github.com/declanshanaghy/JabberBot/raw/master/Docs/Using%20Diamond%20Coordinates%20to%20Power%20a%20Differential%20Drive.pdf
+    float TempYDist = YDist;
+    float TempXDist = XDist;
+    if (YDist > (XDist + 100)) {  //  if outside top left.  equation of line is y=x+Max, so if y > x+Max then it is above line
+      // OK, the first fun bit. :)  so for the 2 lines this is always true y = m1*x + b1 and y = m2*x - b2
+      // y - y = m1*x + b1  - m2*x - b2  or 0 = (m1 - m2)*x + b1 - b2
+      // We have y = x+100 and y = ((change in y)/Change in x))x
+      // So:   x = -100/(1-(change in y)/Change in x)) and using y = x+100 we can find y with the new x
+      // Not too bad when simplified. :P
+      TempXDist = -100 / (1 - (TempYDist / TempXDist));
+      TempYDist = TempXDist + 100;
+    } else if (YDist > (100 - XDist)) {  //  if outside top right
+      // repeat intesection for y = 100 - x
+      TempXDist = -100 / (-1 - (TempYDist / TempXDist));
+      TempYDist = -TempXDist + 100;
+    } else if (YDist < (-XDist - 100)) {  //  if outside bottom left
+      // repeat intesection for y = -x - 100
+      TempXDist = 100 / (-1 - (TempYDist / TempXDist));
+      TempYDist = -TempXDist - 100;
+    } else if (YDist < (XDist - 100)) {  //  if outside bottom right
+      // repeat intesection for y = x - 100
+      TempXDist = 100 / (1 - (TempYDist / TempXDist));
+      TempYDist = TempXDist - 100;
+    }
+    //  all coordinates now in diamond. next translate to the diamond coordinates.
+    //  for the left.  send ray to y = x + Max from coordinates along y = -x + b
+    //  find for b, solve for coordinates and resut in y then scale using y = (y - max/2)*2
+    float LeftSpeed = ((TempXDist + TempYDist - 100) / 2) + 100;
+    LeftSpeed = (LeftSpeed - 50) * 2;
+    //  for right send ray to y = -x + Max from coordinates along y = x + b find intersction coordinates and then use the Y vaule and scale.
+    float RightSpeed = ((TempYDist - TempXDist - 100) / 2) + 100;
+    RightSpeed = (RightSpeed - 50) * 2;
+    //  this results in a -100 to 100 range of speeds, so shift to servo range.
+
+    /* Debugging by KnightShade - this didn't do the speed like we expected.  Notice that they are constant values.....
+      // map(maxDriveSpeed, 0, 127, 90, 180); //drivespeed was defined as 0 to 127 for Sabertooth serial, now we want something in an upper servo range (90 to 180)
+      #if leftDirection == 0
+      leftFoot=map(LeftSpeed, -100, 100, 180, 0);
+      #else
+      leftFoot=map(LeftSpeed, -100, 100, 0, 180);
+      #endif
+      #if rightDirection == 0
+      rightFoot=map(RightSpeed, -100, 100, 180, 0);
+      #else
+      rightFoot=map(RightSpeed, -100, 100, 0, 180);
+      #endif
+      
+      First pass, treat the throttle as ON/OFF - not an Analog shift (as Sabertooth code does)
+      Based on that Paul passed in Drive Speed 1 or 2.
+      */
+    int maxServoForward = map(maxDriveSpeed, 0, 127, 90, 180);  //drivespeed was defined as 0 to 127 for Sabertooth serial, now we want something in an upper servo range (90 to 180)
+    int maxServoReverse = map(maxDriveSpeed, 0, 127, 90, 0);    //drivespeed was defined as 0 to 127 for Sabertooth serial, now we want something in an upper servo range (90 to 0)
+#if leftDirection == 0
+    leftFoot = map(LeftSpeed, -100, 100, maxServoForward, maxServoReverse);
+#else
+    leftFoot = map(LeftSpeed, -100, 100, maxServoReverse, maxServoForward);
+#endif
+#if rightDirection == 0
+    rightFoot = map(RightSpeed, -100, 100, maxServoForward, maxServoReverse);
+#else
+    rightFoot = map(RightSpeed, -100, 100, maxServoReverse, maxServoForward);
+#endif
+    /*  END Knightshade Debug */
+  } else {
+    leftFoot = 90;
+    rightFoot = 90;
+  }
+}
+#endif
+
+// =======================================================================================
+// ////////////////////////END:  Mixing Function for R/C Mode/////////////////////////////
+// =======================================================================================
+
+void stopFeet() {
+#if FOOT_CONTROLLER == 0
+  Sabertooth2x.drive(0);
+  Sabertooth2x.turn(0);
+#elif FOOT_CONTROLLER == 1
+  leftFootSignal.write(90);
+  rightFootSignal.write(90);
+#endif
 }

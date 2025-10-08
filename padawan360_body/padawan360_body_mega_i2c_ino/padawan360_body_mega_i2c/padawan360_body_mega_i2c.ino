@@ -110,10 +110,6 @@ const int SABERTOOTHBAUDRATE = 9600;
 // and I think it varies across different firmware versions.
 const int DOMEBAUDRATE = 9600;
 
-// Default sound volume at startup
-// 0 = full volume, 255 off
-byte vol = 20;
-
 
 // Automation Delays
 // set automateDelay to min and max seconds between sounds
@@ -125,12 +121,26 @@ int turnDirection = 20;
 #define EXTINGUISHERPIN 3
 
 #include <Sabertooth.h>
-#include <MP3Trigger.h>
 #include <Wire.h>
 #include <XBOXRECV.h>
-
+#include <hcr.h>
 #include <Servo.h>
 
+
+/////////////////////////////////////////////////////////////////
+// Setup the HCR Vocalizer for serial communication
+// Default sound volume at startup
+// 100 = full volume, 0 off
+int vol = 80;
+
+const int HCRBAUDERATE = 9600;
+// Set the baude rate for the Teensy 4.1 running Human Cyborg Relations
+// 9600 is the default
+
+// Initialise the HCR Vocalizer API
+HCRVocalizer HCR(&Serial3,9600); // Serial (Stream Port, baud rate)
+//HCRVocalizer HCR(16,17,9600); // Serial (RX Pin, TX Pin, baud rate)
+// HCRVocalizer HCR(14,15,HCRBAUDERATE); // Serial (RX Pin, TX Pin, baud rate)
 
 /////////////////////////////////////////////////////////////////
 #if FOOT_CONTROLLER == 0
@@ -185,9 +195,6 @@ ButtonEnum hpLightToggleButton;
 
 boolean isHPOn = false;
 
-
-
-MP3Trigger mp3Trigger;
 USB Usb;
 XBOXRECV Xbox(&Usb);
 
@@ -200,6 +207,25 @@ Servo rightFootSignal;
 void setup() {
   Serial1.begin(SABERTOOTHBAUDRATE);
   Serial2.begin(DOMEBAUDRATE);
+  Serial3.begin(HCRBAUDERATE);
+  Serial.begin(38400); // Debug console
+  delay(100);
+  
+  // Initiate and set some default values for the HCR Vocalizer
+  HCR.begin(125); // Refresh Speed (Default:125 ms)
+  HCR.OverrideEmotions(1); // Override emotions and prevent emotions normalising
+  HCR.SetEmotion(HAPPY,89); // Set Happy to 89%
+  HCR.SetEmotion(SAD,22); // Set Sadness to 22%
+  HCR.SetEmotion(MAD,0); // Set Anger to 0%
+  HCR.SetEmotion(SCARED,0); // Set Anxiety to 0% 
+
+  // Set volume for all channels
+  HCR.SetVolume(1,vol); // Set volume (0-255)
+  HCR.SetVolume(2,vol); // Set volume (0-255)
+  HCR.SetVolume(3,vol); // Set volume (0-255)
+  
+  Serial.println("Hello World");
+
 
 #if defined(SYRENSIMPLE)
   Syren10.motor(0);
@@ -236,9 +262,6 @@ void setup() {
   pinMode(EXTINGUISHERPIN, OUTPUT);
   digitalWrite(EXTINGUISHERPIN, HIGH);
 
-  mp3Trigger.setup();
-  mp3Trigger.setVolume(vol);
-
   if (isLeftStickDrive) {
     throttleAxis = LeftHatY;
     turnAxis = LeftHatX;
@@ -263,15 +286,16 @@ void setup() {
   while (!Serial)
     ;
   if (Usb.Init() == -1) {
-    //Serial.print(F("\r\nOSC did not start"));
+    Serial.print(F("\r\nOSC did not start"));
     while (1)
       ;  //halt
   }
-  //Serial.print(F("\r\nXbox Wireless Receiver Library Started"));
+  Serial.print(F("\r\nXbox Wireless Receiver Library Started"));
 }
 
 
 void loop() {
+
   Usb.Task();
   // if we're not connected, return so we don't bother doing anything else.
   // set all movement to 0 so if we lose connection we don't have a runaway droid!
@@ -286,13 +310,15 @@ void loop() {
 
     Syren10.motor(1, 0);
     firstLoadOnConnect = false;
+    // Serial.println("Xbox Controller Disconnected");
     return;
   }
 
   // After the controller connects, Blink all the LEDs so we know drives are disengaged at start
   if (!firstLoadOnConnect) {
     firstLoadOnConnect = true;
-    mp3Trigger.play(21);
+
+    HCR.PlayWAV(1,"0021");
     Xbox.setLedMode(ROTATING, 0);
   }
 
@@ -307,10 +333,11 @@ void loop() {
     if (isDriveEnabled) {
       isDriveEnabled = false;
       Xbox.setLedMode(ROTATING, 0);
-      mp3Trigger.play(53);
+
+      HCR.PlayWAV(1,"0053");
     } else {
       isDriveEnabled = true;
-      mp3Trigger.play(52);
+        HCR.PlayWAV(1,"0052");
       // //When the drive is enabled, set our LED accordingly to indicate speed
       if (drivespeed == DRIVESPEED1) {
         Xbox.setLedOn(LED1, 0);
@@ -327,10 +354,12 @@ void loop() {
     if (isInAutomationMode) {
       isInAutomationMode = false;
       automateAction = 0;
-      mp3Trigger.play(53);
+
+      HCR.PlayWAV(1,"0053");
+
     } else {
       isInAutomationMode = true;
-      mp3Trigger.play(52);
+      HCR.PlayWAV(1,"0052");
     }
   }
 
@@ -343,7 +372,7 @@ void loop() {
       automateAction = random(1, 5);
 
       if (automateAction > 1) {
-        mp3Trigger.play(random(32, 52));
+        HCR.PlayRandomWAV(1,"0009","0052");
       }
       if (automateAction < 4) {
 #if defined(SYRENSIMPLE)
@@ -372,23 +401,30 @@ void loop() {
     }
   }
 
-  // Volume Control of MP3 Trigger
+  // Volume Control of HCR
   // Hold R1 and Press Up/down on D-pad to increase/decrease volume
   if (Xbox.getButtonClick(UP, 0)) {
     // volume up
     if (Xbox.getButtonPress(R1, 0)) {
-      if (vol > 0) {
-        vol--;
-        mp3Trigger.setVolume(vol);
+      Serial.println("Volume Up");
+      if (vol < 100) {
+        vol++;
+          // Set volume for all channels
+        HCR.SetVolume(1,vol); // Set volume (0-255)
+        HCR.SetVolume(2,vol); // Set volume (0-255)
+        HCR.SetVolume(3,vol); // Set volume (0-255)
       }
     }
   }
   if (Xbox.getButtonClick(DOWN, 0)) {
     //volume down
     if (Xbox.getButtonPress(R1, 0)) {
-      if (vol < 255) {
-        vol++;
-        mp3Trigger.setVolume(vol);
+      if (vol > 0) {
+        vol--;
+        // Set volume for all channels
+        HCR.SetVolume(1,vol); // Set volume (0-255)
+        HCR.SetVolume(2,vol); // Set volume (0-255)
+        HCR.SetVolume(3,vol); // Set volume (0-255)
       }
     }
   }
@@ -426,19 +462,19 @@ void loop() {
   // Y Button and Y combo buttons
   if (Xbox.getButtonClick(Y, 0)) {
     if (Xbox.getButtonPress(L1, 0)) {
-      mp3Trigger.play(8);
+      HCR.PlayWAV(1,"0008");
       //logic lights, random
       triggerI2C(10, 0);
     } else if (Xbox.getButtonPress(L2, 0)) {
-      mp3Trigger.play(2);
+      HCR.PlayWAV(1,"0002");
       //logic lights, random
       triggerI2C(10, 0);
     } else if (Xbox.getButtonPress(R1, 0)) {
-      mp3Trigger.play(9);
+      HCR.PlayWAV(1,"0009");
       //logic lights, random
       triggerI2C(10, 0);
     } else {
-      mp3Trigger.play(random(13, 17));
+      // mp3Trigger.play(random(13, 17));
       //logic lights, random
       triggerI2C(10, 0);
     }
@@ -447,7 +483,7 @@ void loop() {
   // A Button and A combo Buttons
   if (Xbox.getButtonClick(A, 0)) {
     if (Xbox.getButtonPress(L1, 0)) {
-      mp3Trigger.play(6);
+      HCR.PlayWAV(1,"0006");
       //logic lights
       triggerI2C(10, 6);
       // HPEvent 11 - SystemFailure - I2C
@@ -455,7 +491,7 @@ void loop() {
       triggerI2C(26, 11);
       triggerI2C(27, 11);
     } else if (Xbox.getButtonPress(L2, 0)) {
-      mp3Trigger.play(1);
+      HCR.PlayWAV(1,"0001");
       //logic lights, alarm
       triggerI2C(10, 1);
       //  HPEvent 3 - alarm - I2C
@@ -463,11 +499,11 @@ void loop() {
       triggerI2C(26, 3);
       triggerI2C(27, 3);
     } else if (Xbox.getButtonPress(R1, 0)) {
-      mp3Trigger.play(11);
+      HCR.PlayWAV(1,"0011");
       //logic lights, alarm2Display
       triggerI2C(10, 11);
     } else {
-      mp3Trigger.play(random(17, 25));
+      HCR.PlayRandomWAV(1,"0017","0025");
       //logic lights, random
       triggerI2C(10, 0);
     }
@@ -476,15 +512,15 @@ void loop() {
   // B Button and B combo Buttons
   if (Xbox.getButtonClick(B, 0)) {
     if (Xbox.getButtonPress(L1, 0)) {
-      mp3Trigger.play(7);
+      HCR.PlayWAV(1,"0007");
       //logic lights, random
       triggerI2C(10, 0);
     } else if (Xbox.getButtonPress(L2, 0)) {
-      mp3Trigger.play(3);
+      HCR.PlayWAV(1,"0003");
       //logic lights, random
       triggerI2C(10, 0);
     } else if (Xbox.getButtonPress(R1, 0)) {
-      mp3Trigger.play(10);
+      HCR.PlayWAV(1,"0010");
       //logic lights bargrap
       triggerI2C(10, 10);
       // HPEvent 1 - Disco - I2C
@@ -492,7 +528,7 @@ void loop() {
       triggerI2C(26, 10);
       triggerI2C(27, 10);
     } else {
-      mp3Trigger.play(random(32, 52));
+      HCR.PlayRandomWAV(1,"0032","0052");
       //logic lights, random
       triggerI2C(10, 0);
     }
@@ -502,21 +538,21 @@ void loop() {
   if (Xbox.getButtonClick(X, 0)) {
     // leia message L1+X
     if (Xbox.getButtonPress(L1, 0)) {
-      mp3Trigger.play(5);
+      HCR.PlayWAV(1,"0005");
       //logic lights, leia message
       triggerI2C(10, 5);
       // Front HPEvent 1 - HoloMessage - I2C -leia message
       triggerI2C(25, 9);
     } else if (Xbox.getButtonPress(L2, 0)) {
-      mp3Trigger.play(4);
+      HCR.PlayWAV(1,"0004");
       //logic lights
       triggerI2C(10, 4);
     } else if (Xbox.getButtonPress(R1, 0)) {
-      mp3Trigger.play(12);
+      HCR.PlayWAV(1,"0012");
       //logic lights, random
       triggerI2C(10, 0);
     } else {
-      mp3Trigger.play(random(25, 32));
+      HCR.PlayRandomWAV(1,"0025","0032");
       //logic lights, random
       triggerI2C(10, 0);
     }
@@ -550,20 +586,20 @@ void loop() {
       //change to medium speed and play sound 3-tone
       drivespeed = DRIVESPEED2;
       Xbox.setLedOn(LED2, 0);
-      mp3Trigger.play(53);
+      HCR.PlayWAV(1,"0053");
       triggerI2C(10, 22);
     } else if (drivespeed == DRIVESPEED2 && (DRIVESPEED3 != 0)) {
       //change to high speed and play sound scream
       drivespeed = DRIVESPEED3;
       Xbox.setLedOn(LED3, 0);
-      mp3Trigger.play(1);
+      HCR.PlayWAV(1,"0001");
       triggerI2C(10, 23);
     } else {
       //we must be in high speed
       //change to low speed and play sound 2-tone
       drivespeed = DRIVESPEED1;
       Xbox.setLedOn(LED1, 0);
-      mp3Trigger.play(52);
+      HCR.PlayWAV(1,"0052");
       triggerI2C(10, 21);
     }
   }
@@ -624,8 +660,11 @@ void loop() {
   turnThrottleraw = Xbox.getAnalogHat(turnAxis, 0);
 
   if (isDriveEnabled) {
-    if (throttleStickValueraw > (-DRIVEDEADZONERANGE * 258) && throttleStickValueraw < (DRIVEDEADZONERANGE * 258)) {
-      // stick is in dead zone - don't drive
+    // Check if EITHER the throttle (Y-axis) OR the turning (X-axis) is outside the deadzone
+    if ( (throttleStickValueraw > (-DRIVEDEADZONERANGE * 258) && throttleStickValueraw < (DRIVEDEADZONERANGE * 258)) &&
+         (turnThrottleraw > (-DRIVEDEADZONERANGE * 258) && turnThrottleraw < (DRIVEDEADZONERANGE * 258)) ) {
+      
+      // Both axes are in the dead zone - stop
       stopFeet();
     } else {
       if (isInAutomationMode) {  // Turn of automation if using the drive motors
@@ -669,7 +708,7 @@ void triggerAutomation() {
     automateAction = random(1, 5);
 
     if (automateAction > 1) {
-      mp3Trigger.play(random(32, 52));
+      // mp3Trigger.play(random(32, 52));
     }
     if (automateAction < 4) {
 
@@ -801,16 +840,34 @@ void mixBHD(int stickX, int stickY, byte maxDriveSpeed) {
       First pass, treat the throttle as ON/OFF - not an Analog shift (as Sabertooth code does)
       Based on that Paul passed in Drive Speed 1 or 2.
       */
-    int maxServoForward = map(maxDriveSpeed, 0, 127, 90, 180);  //drivespeed was defined as 0 to 127 for Sabertooth serial, now we want something in an upper servo range (90 to 180)
-    int maxServoReverse = map(maxDriveSpeed, 0, 127, 90, 0);    //drivespeed was defined as 0 to 127 for Sabertooth serial, now we want something in an upper servo range (90 to 0)
-#if leftDirection == 0
-    leftFoot = map(LeftSpeed, -100, 100, maxServoForward, maxServoReverse);
-#else
+    int maxServoForward = map(maxDriveSpeed, 0, 127, 90, 180);  // 90 is stop, 180 is full forward
+    int maxServoReverse = map(maxDriveSpeed, 0, 127, 90, 0);    // 90 is stop, 0 is full reverse
+
+    // The mapping from -100 to 100 is based on the motor's *desired direction*.
+
+    // *** LEFT FOOT MAPPING FIX ***
+#if leftDirection == 0 // Assuming leftDirection 0 means 0 is FORWARD, 180 is REVERSE
+    // LeftSpeed -100 (REV) maps to maxServoForward (0)
+    // LeftSpeed 100 (FWD) maps to maxServoReverse (180)
+    // Map (-100, 100) to (maxServoForward, maxServoReverse)
+    leftFoot = map(LeftSpeed, -100, 100, maxServoReverse, maxServoForward);
+#else  // leftDirection 1 means 180 is FORWARD, 0 is REVERSE (Standard Servo)
+    // LeftSpeed -100 (REV) maps to maxServoReverse (0)
+    // LeftSpeed 100 (FWD) maps to maxServoForward (180)
+    // Map (-100, 100) to (maxServoReverse, maxServoForward)
     leftFoot = map(LeftSpeed, -100, 100, maxServoReverse, maxServoForward);
 #endif
-#if rightDirection == 0
-    rightFoot = map(RightSpeed, -100, 100, maxServoForward, maxServoReverse);
-#else
+
+    // *** RIGHT FOOT MAPPING FIX ***
+#if rightDirection == 0 // Assuming rightDirection 0 means 0 is FORWARD, 180 is REVERSE
+    // RightSpeed -100 (REV) maps to maxServoForward (0)
+    // RightSpeed 100 (FWD) maps to maxServoReverse (180)
+    // Map (-100, 100) to (maxServoReverse, maxServoForward)
+    rightFoot = map(RightSpeed, -100, 100, maxServoReverse, maxServoForward);
+#else  // rightDirection 1 means 180 is FORWARD, 0 is REVERSE (Standard Servo)
+    // RightSpeed -100 (REV) maps to maxServoReverse (0)
+    // RightSpeed 100 (FWD) maps to maxServoForward (180)
+    // Map (-100, 100) to (maxServoReverse, maxServoForward)
     rightFoot = map(RightSpeed, -100, 100, maxServoReverse, maxServoForward);
 #endif
     /*  END Knightshade Debug */

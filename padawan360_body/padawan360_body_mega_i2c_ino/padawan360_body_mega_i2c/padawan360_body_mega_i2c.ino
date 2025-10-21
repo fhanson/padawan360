@@ -502,18 +502,27 @@ void loop() {
   // Y Button and Y combo buttons
   if (Xbox.getButtonClick(Y, 0)) {
     if (Xbox.getButtonPress(L1, 0)) {
+      // Play whistle beep wooo
       HCR.PlayWAV(1,"0008");
       //logic lights, random
       triggerI2C(10, 0);
     } else if (Xbox.getButtonPress(L2, 0)) {
+      // chuckle and fart noise
       HCR.PlayWAV(1,"0002");
       //logic lights, random
       triggerI2C(10, 0);
     } else if (Xbox.getButtonPress(R1, 0)) {
+      // star wars opening music
       HCR.PlayWAV(1,"0009");
       //logic lights, random
       triggerI2C(10, 0);
+    } else if (Xbox.getButtonPress(R2, 0)) {
+      // sad noises
+      HCR.Stimulate(HAPPY,EMOTE_MODERATE);
+      //logic lights, random
+      triggerI2C(10, 0);
     } else {
+      // random happy noises
       HCR.PlayRandomWAV(1,"0013","0017");
       //logic lights, random
       triggerI2C(10, 0);
@@ -523,6 +532,7 @@ void loop() {
   // A Button and A combo Buttons
   if (Xbox.getButtonClick(A, 0)) {
     if (Xbox.getButtonPress(L1, 0)) {
+      // system failure sound
       HCR.PlayWAV(1,"0006");
       //logic lights
       triggerI2C(10, 6);
@@ -531,6 +541,7 @@ void loop() {
       triggerI2C(26, 11);
       triggerI2C(27, 11);
     } else if (Xbox.getButtonPress(L2, 0)) {
+      // waaaah alarm sound
       HCR.PlayWAV(1,"0001");
       //logic lights, alarm
       triggerI2C(10, 1);
@@ -539,10 +550,17 @@ void loop() {
       triggerI2C(26, 3);
       triggerI2C(27, 3);
     } else if (Xbox.getButtonPress(R1, 0)) {
+      // Imperial March song
       HCR.PlayWAV(1,"0011");
       //logic lights, alarm2Display
       triggerI2C(10, 11);
+    } else if (Xbox.getButtonPress(R2, 0)) {
+      // sad robot noises
+      HCR.Stimulate(SAD,EMOTE_MODERATE);
+      //logic lights, sad
+      triggerI2C(10, 2);
     } else {
+      // random whistle beeps and woos
       HCR.PlayRandomWAV(1,"0017","0025");
       //logic lights, random
       triggerI2C(10, 0);
@@ -552,14 +570,19 @@ void loop() {
   // B Button and B combo Buttons
   if (Xbox.getButtonClick(B, 0)) {
     if (Xbox.getButtonPress(L1, 0)) {
+      // beep beep boop boop noises
       HCR.PlayWAV(1,"0007");
       //logic lights, random
       triggerI2C(10, 0);
     } else if (Xbox.getButtonPress(L2, 0)) {
+      // doot doot and whistle noises
       HCR.PlayWAV(1,"0003");
+      // point sequence on maestro
+      maestro.restartScript(9);
       //logic lights, random
       triggerI2C(10, 0);
     } else if (Xbox.getButtonPress(R1, 0)) {
+      // cantina disco music
       HCR.PlayWAV(1,"0010");
       //logic lights bargrap
       triggerI2C(10, 10);
@@ -567,6 +590,11 @@ void loop() {
       triggerI2C(25, 10);
       triggerI2C(26, 10);
       triggerI2C(27, 10);
+    } else if (Xbox.getButtonPress(R2, 0)) {
+      // random robot noises
+      HCR.Stimulate(random(0,4),random(0,2));
+      //logic lights, mad
+      triggerI2C(10, 3);
     } else {
       HCR.PlayRandomWAV(1,"0032","0052");
       //logic lights, random
@@ -583,14 +611,22 @@ void loop() {
       triggerI2C(10, 5);
       // Front HPEvent 1 - HoloMessage - I2C -leia message
       triggerI2C(25, 9);
+      Serial1.write("f001|15"); //sends leia holo message to flthyHPs over serial
     } else if (Xbox.getButtonPress(L2, 0)) {
+      // happy wolf whistle
       HCR.PlayWAV(1,"0004");
       //logic lights
       triggerI2C(10, 4);
     } else if (Xbox.getButtonPress(R1, 0)) {
+      // Duel of the Fates music
       HCR.PlayWAV(1,"0012");
       //logic lights, random
       triggerI2C(10, 0);
+    } else if (Xbox.getButtonPress(R2, 0)) {
+      // mad robot noises
+      HCR.Stimulate(MAD,EMOTE_MODERATE);
+      //logic lights, mad
+      triggerI2C(10, 3);
     } else {
       HCR.PlayRandomWAV(1,"0025","0032");
       //logic lights, random

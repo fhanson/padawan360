@@ -16,6 +16,10 @@ support for PS3 and Xbox 360 controllers. Bluetooth dongles were inconsistent as
 so I wanted to be able to have something with parts that other builder's could easily track
 down and buy parts even at your local big box store.
 
+v4.0 Add support for Pololu Maestro over serial and convert audio to Human Cyborg Relations
+ - Heavily influenced from https://github.com/Imperiallandm/padawan_360_mega_maestro/blob/main/Padawan360_body_mega_maestro.ino
+
+
 V3.0 Add PWM Foot drive for use with Q85 style hub drives with individual speed controllers
 - Based on KnightShade's SHADOW code with contributions for PWM Motor Controllers by JoyMonkey/Paul Murphy
 - With credit to Brad/BHD
@@ -30,13 +34,9 @@ Microsoft Xbox 360 Controller
 Xbox 360 USB Wireless Reciver
 Sabertooth Motor Controller
 Syren Motor Controller
-Sparkfun MP3 Trigger
+Teensy 4.1 with Audio shield running Human Cyborg Relations
 
-This sketch supports I2C and calls events on many sound effect actions to control lights and sounds.
-It is NOT set up for Dan's method of using the serial packet to transfer data up to the dome
-to trigger some light effects.It uses Hardware Serial pins on the Mega to control Sabertooth and Syren
 
-Set Sabertooth 2x25/2x12 Dip Switches 1 and 2 Down, All Others Up
 For SyRen Simple Serial Set Switches 1 and 2 Down, All Others Up
 For SyRen Simple Serial Set Switchs 2 & 4 Down, All Others Up
 Placed a 10K ohm resistor between S1 & GND on the SyRen 10 itself
@@ -50,8 +50,8 @@ int SteeringFactor = 100;  //The larger SteeringFactor is the less senstitive st
                            //XDist*sqrt(XDist+SteeringFactor)
 #define leftFootPin 44     //connect this pin to motor controller for left foot (R/C mode)
 #define rightFootPin 45    //connect this pin to motor controller for right foot (R/C mode)
-#define leftDirection 1    //change this if your motor is spinning the wrong way
-#define rightDirection 0   //change this if your motor is spinning the wrong way
+#define leftDirection 0    //change this if your motor is spinning the wrong way
+#define rightDirection 1   //change this if your motor is spinning the wrong way
 int leftFoot = 90;
 int rightFoot = 90;
 
@@ -99,16 +99,11 @@ const byte RAMPING = 5;
 const byte DOMEDEADZONERANGE = 20;
 const byte DRIVEDEADZONERANGE = 20;
 
-// Set the baude rate for the Sabertooth motor controller (feet)
-// 9600 is the default baud rate for Sabertooth packet serial.
-// for packetized options are: 2400, 9600, 19200 and 38400. I think you need to pick one that works
-// and I think it varies across different firmware versions.
-const int SABERTOOTHBAUDRATE = 9600;
 
 // Set the baude rate for the Syren motor controller (dome)
 // for packetized options are: 2400, 9600, 19200 and 38400. I think you need to pick one that works
 // and I think it varies across different firmware versions.
-const int DOMEBAUDRATE = 9600;
+const int DOMEMOTORBAUDERATE = 9600;
 
 
 // Automation Delays
@@ -125,6 +120,17 @@ int turnDirection = 20;
 #include <XBOXRECV.h>
 #include <hcr.h>
 #include <Servo.h>
+#include <PololuMaestro.h>
+
+//////////////////////////////////////////////////////////////////
+// Setup Dome electronics serial chain
+// Dome electronics are daisy chained on hardware Serial3
+
+const int DOMESERIALBAUDERATE = 9600;
+
+/////////////////////////////////////////////////////////////////
+// Setup the Maestro Mini 18 for serial communication
+MiniMaestro maestro(Serial1); // Use Serial1 for communication with Maestro
 
 
 /////////////////////////////////////////////////////////////////
@@ -179,20 +185,6 @@ AnalogHatEnum turnAxis;
 AnalogHatEnum domeAxis;
 ButtonEnum speedSelectButton;
 ButtonEnum hpLightToggleButton;
-
-
-// this is legacy right now. The rest of the sketch isn't set to send any of this
-// data to another arduino like the original Padawan sketch does
-// right now just using it to track whether or not the HP light is on so we can
-// fire the correct I2C event to turn on/off the HP light.
-//struct SEND_DATA_STRUCTURE{
-//  //put your variable definitions here for the data you want to send
-//  //THIS MUST BE EXACTLY THE SAME ON THE OTHER ARDUINO
-//  int hpl; // hp light
-//  int dsp; // 0 = random, 1 = alarm, 5 = leia, 11 = alarm2, 100 = no change
-//};
-//SEND_DATA_STRUCTURE domeData;//give a name to the group of data
-
 boolean isHPOn = false;
 
 USB Usb;
@@ -205,8 +197,8 @@ Servo rightFootSignal;
 #endif
 
 void setup() {
-  Serial1.begin(SABERTOOTHBAUDRATE);
-  Serial2.begin(DOMEBAUDRATE);
+  Serial1.begin(DOMESERIALBAUDERATE);
+  Serial2.begin(DOMEMOTORBAUDERATE);
   Serial3.begin(HCRBAUDERATE);
   Serial.begin(38400); // Debug console
   delay(100);
@@ -442,7 +434,55 @@ void loop() {
     }
   }
 
+  if (Xbox.getButtonPress(R2, 0)) {
+      if (Xbox.getButtonPress(UP, 0)) {
+      maestro.restartScript(0);
+      
+      } 
+    }
 
+  if (Xbox.getButtonPress(R2, 0)) {
+      if (Xbox.getButtonPress(RIGHT, 0)) {
+      maestro.restartScript(1);
+      
+      } 
+    }
+  if (Xbox.getButtonPress(R2, 0)) {
+      if (Xbox.getButtonPress(DOWN, 0)) {
+      maestro.restartScript(2);
+      
+      } 
+    }
+
+    if (Xbox.getButtonPress(R2, 0)) {
+      if (Xbox.getButtonPress(LEFT, 0)) {
+      maestro.restartScript(3);
+      
+      } 
+    }
+  if (Xbox.getButtonPress(L2, 0)) {
+      if (Xbox.getButtonPress(UP, 0)) {
+      maestro.restartScript(4);
+      HCR.PlayWAV(1,"0001");
+      }
+    }
+    if (Xbox.getButtonPress(L2, 0)) {
+      if (Xbox.getButtonPress(RIGHT, 0)) {
+      maestro.restartScript(5);
+      HCR.PlayWAV(1,"0003");
+      }
+    }
+  if (Xbox.getButtonPress(L2, 0)) {
+      if (Xbox.getButtonPress(DOWN, 0)) {
+      maestro.restartScript(6);
+      }
+    }
+
+  if (Xbox.getButtonPress(L2, 0)) {
+      if (Xbox.getButtonPress(LEFT, 0)) {
+      maestro.restartScript(7);
+      }
+    }
   //FIRE EXTINGUISHER
   // When holding L2-UP, extinguisher is spraying. WHen released, stop spraying
 
@@ -474,7 +514,7 @@ void loop() {
       //logic lights, random
       triggerI2C(10, 0);
     } else {
-      // mp3Trigger.play(random(13, 17));
+      HCR.PlayRandomWAV(1,"0013","0017");
       //logic lights, random
       triggerI2C(10, 0);
     }
@@ -708,7 +748,7 @@ void triggerAutomation() {
     automateAction = random(1, 5);
 
     if (automateAction > 1) {
-      // mp3Trigger.play(random(32, 52));
+      HCR.PlayRandomWAV(1,"0032","0052");
     }
     if (automateAction < 4) {
 
@@ -855,7 +895,7 @@ void mixBHD(int stickX, int stickY, byte maxDriveSpeed) {
     // LeftSpeed -100 (REV) maps to maxServoReverse (0)
     // LeftSpeed 100 (FWD) maps to maxServoForward (180)
     // Map (-100, 100) to (maxServoReverse, maxServoForward)
-    leftFoot = map(LeftSpeed, -100, 100, maxServoReverse, maxServoForward);
+    leftFoot = map(LeftSpeed, 100, -100, maxServoReverse, maxServoForward);
 #endif
 
     // *** RIGHT FOOT MAPPING FIX ***
@@ -868,7 +908,7 @@ void mixBHD(int stickX, int stickY, byte maxDriveSpeed) {
     // RightSpeed -100 (REV) maps to maxServoReverse (0)
     // RightSpeed 100 (FWD) maps to maxServoForward (180)
     // Map (-100, 100) to (maxServoReverse, maxServoForward)
-    rightFoot = map(RightSpeed, -100, 100, maxServoReverse, maxServoForward);
+    rightFoot = map(RightSpeed, 100, -100, maxServoReverse, maxServoForward);
 #endif
     /*  END Knightshade Debug */
   } else {
